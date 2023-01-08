@@ -43,6 +43,7 @@ class Scan:
             current_img = self.usImage(img,TRI,self.images,int(self.folder))
             self.images.append(current_img)
 
+    #Get volar skin points 
     def skin_reconstruct(self):
         for img in self.images:
             img.get_skin_surf()
@@ -74,6 +75,7 @@ class Scan:
                 except:
                     self.dorsal_points = np.array(current_img.dorsal_pts_RCS)
 
+    #Fits skin points to 3D polynomial and gets the max point (highest z-value)
     def get_max_skin_point(self):
         point_data = self.skin_points
         def function(data, a0, a1,a2, a3, a4, a5):
@@ -105,6 +107,9 @@ class Scan:
         points = np.stack([x,y,z],axis=1)
         self.max_skin_point = points[np.where(points[:,2] == np.max(points[:,2]))]
 
+    #Shift points according to skin
+    #This is to help account for slight movement of the hand between scans 
+    #(doesn't account for rotation, but works bc there is very little difference between scans)
     def shift_points(self,other_msp):
         shift = other_msp-self.max_skin_point
         if muscle == 'APB':
@@ -122,11 +127,14 @@ class Scan:
             self.hyst_hight = HYST_hight_vals[scan_n]
             self.current_img_index=len(images)
 
+        #segment image
         def segment(self,shift,muscles,seg_range):
+            print("scan: ", self.n, "image: ",self.current_img_index," out of ",seg_range[1])
+
             self.seg_range=seg_range
             self.muscles = muscles
             self.shift=shift
-            print("scan: ", self.n, "image: ",self.current_img_index," out of ",seg_range[1])
+
             self.project_muscle()
             self.get_volar_pts()
 
@@ -138,6 +146,8 @@ class Scan:
                     self.show_plot()
                 if self.skip_d == True or self.skip_v == True:
                     break
+            
+            #APB uses volar muscle points
             if muscle =='APB':
                 if self.volar_pts.shape[0]>1:
                     self.volar_pts_RCS = self.ICS_to_RCS(self.volar_pts)
@@ -236,11 +246,13 @@ class Scan:
             except:
                 self.skin_surf, self.skin_pts_RCS = np.array([0,0],ndmin=2), np.array([0,0,0],ndmin=2)
         
+        #Get the volar muscle border points
         def get_muscle_surf(self):
             #apply hysteresis threshold
             hyst = self.apply_hyst_thresh()
             hyst_T = np.transpose(hyst)
 
+            #Go along the skin surface and search for the muscle surface below it
             for point in self.skin_surf:
                 j=point[0]
                 i=point[1]
@@ -254,21 +266,12 @@ class Scan:
                         break
                     i+=1
 
+            #Apply canny edge detection
             canny = feature.canny(self.img,5.5,low_threshold = 0.05, high_threshold = 0.1)
-            """fig, ax = plt.subplots(nrows=2,ncols=1)
 
-            ax[0].imshow(self.img, cmap='gray')
-            ax[0].set_title('original image')
-
-            ax[1].imshow(canny, cmap='magma')
-            ax[1].set_title('edges')
-
-            plt.tight_layout()
-            plt.show()"""
-
+            #Remove outliers in volar muscle surface
             for point in l2d_edge:
                 skin_point = self.skin_surf[np.where(self.skin_surf[:,0] == point[0])][0]
-                #print(point,skin_point)
                 upper_bound = ((skin_point[1]+point[1])/2+point[1])/2
                 lower_bound = point[1]+50
                 i,j=point[1],point[1]
@@ -288,8 +291,8 @@ class Scan:
                             break
                     j+=1
                 
+                #If border point found, add it to volar_pts
                 if pixel == True:
-                    #print(point,volar_point)
                     try:
                         self.volar_pts = np.vstack([self.volar_pts,volar_point])
                     except:
@@ -502,6 +505,7 @@ class Scan:
                     j = 0
                     continue
                 
+                #Find closest edge to coordinates from previous edge
                 close_edges = []
                 for prev_edge in previous_edges:
                     min_x,max_x,min_y,max_y = np.min(prev_edge[:,0]),np.max(prev_edge[:,0]),np.min(prev_edge[:,1]),np.max(prev_edge[:,1])
@@ -541,7 +545,6 @@ class Scan:
                         self.dorsal_pts = np.array(edge,ndmin=2)
                     edgesep = edge + adjust
                     self.b2mpeak_sep.append(edgesep)
-                    #edge -= adjust
 
             
             dmin = self.dorsal_pts[np.where(self.dorsal_pts[:,0] == np.min(self.dorsal_pts[:,0]))][0]
@@ -578,9 +581,6 @@ class Scan:
                     x=np.arange(edge[-1,0],vmax[0]+10,1)
                 y = np.polyval(f,x)
                 xy = np.stack((x,y),axis=-1)
-                #if muscle == 'APB' and self.n != 2:
-                    #self.dorsal_pts = np.vstack([self.dorsal_pts,xy])
-
 
 
             #Adjust extracted dorsal points to Image Coordinate System
@@ -598,8 +598,6 @@ class Scan:
             #blurred = skimage.filters.gaussian(self.cropped_img, sigma=(sigma, sigma), truncate=3.5, multichannel=True)
             blurred = filters.apply_hysteresis_threshold(self.cropped_img,0.4,0.75)
             blurred = binary_to_gs(blurred)
-            """plt.imshow(blurred)
-            plt.show()"""
             min_point = np.where(blurred[:,self.skin_peak[0]]==np.min(blurred[5:,self.skin_peak[0]]))[0][0]
             blurred=blurred*255
             flood = flood_fill(blurred,(min_point,self.skin_peak[0]),255,tolerance=100-blurred[min_point,self.skin_peak[0]])
@@ -644,6 +642,7 @@ class Scan:
             redo = False
             return redo
 
+        #display plot with extracted points
         def show_plot(self):
             plt.imshow(self.img, cmap='gray')
             if muscle == 'APB':
@@ -660,12 +659,18 @@ class Scan:
             def press_skip_v(event):
                 self.skip_v = True 
                 print("skipping. no dorsal points extracted.")
+            
+            #Redo button
             axes = plt.axes([0.7, 0.05, 0.1, 0.075])
             bredo = matplotlib.widgets.Button(axes,'Redo')
             bredo.on_clicked(press_redo)
+
+            #Do not use dorsal points button
             axes = plt.axes([0.4, 0.05, 0.2, 0.075])
             bskip_d = matplotlib.widgets.Button(axes,'Skip dorsal points')
             bskip_d.on_clicked(press_skip_d)
+
+            #Do not use volar points button
             axes = plt.axes([0.1, 0.05, 0.2, 0.075])
             bskip_v = matplotlib.widgets.Button(axes,'Skip volar points')
             bskip_v.on_clicked(press_skip_v)
@@ -693,11 +698,9 @@ class Scan:
             for i in indices_dark:
                 hyst[i[0],i[1]] = True
 
-            #plt.imshow(hyst)
-            #plt.show()
-
             return hyst
 
+        #Convert points from 2D image coordinates to 3D robot coordinates
         def ICS_to_RCS(self,points):
             TRI = self.TRI
             pts_ICS = points * 0.066666666667
