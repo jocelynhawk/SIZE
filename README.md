@@ -10,8 +10,8 @@ Features
 
 - Image segmentation
 - GUI programming
-- Linear Algebra calculations with numpy arrays
 - 3D mesh processing
+- Coordinate system transformations
 
 Dependencies
 --------
