@@ -15,12 +15,12 @@ Features
 
 Dependencies
 --------
--Tkinter
--NumPy
--Vtk
--PyVista
--Matplotlib
--SciPy
+- Tkinter
+- NumPy
+- Vtk
+- PyVista
+- Matplotlib
+- SciPy
 
 Usage
 --------
