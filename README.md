@@ -3,7 +3,6 @@ SIZE
 
 SIZE develops 3D models of the thenar muscles from ultrasound images, and performs geometric calculations of those models. Robot-assisted ultrasound was used to collect images and provide probe position information for each image. 
 
-*ultrasound data needed to run 20220524ImageSegmentation.py is not provided due to human subject privacy
 
 Features
 --------
