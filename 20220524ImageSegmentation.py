@@ -250,7 +250,7 @@ class Scan:
 
             try:
                 #get max skin surface point
-                skin_peakidx = pd.idxmin(self.skin_surf['Y'])
+                skin_peakidx = self.skin_surf['Y'].idxmin()
                 self.skin_peak = self.skin_surf.iloc(skin_peakidx)
             except:
                 self.skin_surf, self.skin_pts_RCS = np.array([0,0],ndmin=2), np.array([0,0,0],ndmin=2)
@@ -381,6 +381,7 @@ class Scan:
                     edge_pts = array_to_xy(edges_gs,75)
                     edge_pts['edge_n'] = n
                     self.dorsal_pts._append(edge_pts)
+                self.dorsal_pts = self.dorsal_pts.set_index('edge_n')
 
                 if closest_edges.shape[0]<1:
                     print("redo: no close edges found.")
@@ -388,10 +389,9 @@ class Scan:
                     return
 
             else:
-                adjust = [self.x_adj,self.y_adj]
-                clicked_points = self.images[self.current_img_index-1].b2mpeak - adjust
-                cutoff = self.images[self.current_img_index-1].b2mpeak - adjust
-                previous_edges = self.images[self.current_img_index-1].b2mpeak_sep
+                clicked_points = self.images[self.current_img_index-1].dorsal_pts - adjust
+                cutoff = self.images[self.current_img_index-1].dorsal_pts - adjust
+                previous_edges = self.images[self.current_img_index-1].dorsal_pts
                 for edge in previous_edges:
                     edge -= adjust        
 
@@ -449,8 +449,10 @@ class Scan:
                 
                 #Find closest edge to coordinates from previous edge
                 close_edges = []
-                for prev_edge in previous_edges:
-                    min_x,max_x,min_y,max_y = np.min(prev_edge[:,0]),np.max(prev_edge[:,0]),np.min(prev_edge[:,1]),np.max(prev_edge[:,1])
+                n = previous_edges['edges_n'].max()+1
+                for m in range(0,n):
+                    prev_edge = previous_edges.loc[m]
+                    min_x,max_x,min_y,max_y = prev_edge['X'].min(),prev_edge['X'].max(),prev_edge['Y'].min(),prev_edge['Y'].max()
                     dist_to_cur_edge = []
                     cur_edges = []
                     for cur_edge in current_edges:
@@ -506,7 +508,8 @@ class Scan:
             #close_edges[np.where(close_edges[:,0,:]==np.min(close_edges[:,0,:]))]
             emins,emaxes=[],[]
             for edge_n in range(0,n+1):
-                emin,emax = np.min(edge[:,0]),np.max(edge[:,0])
+                edge = dorsal_pts.loc[edge_n]
+                emin,emax = dorsal_pts['Y'].min(),dorsal_pts['Y'].max()
                 emins.append(emin)
                 emaxes.append(emax)
             edge0 = close_edges[emins.index(min(emins))]
@@ -526,8 +529,8 @@ class Scan:
 
 
             #Adjust extracted dorsal points to Image Coordinate System
-            self.dorsal_pts[:,0] += self.x_adj
-            self.dorsal_pts[:,1] += self.y_adj
+            self.dorsal_pts['X'] += self.x_adj
+            self.dorsal_pts['Y'] += self.y_adj
 
             self.b2mpeak = self.dorsal_pts
             self.redo = False
@@ -652,7 +655,7 @@ def get_border(img,side):
             lower_pixel_searched = False
             for j,pixel in enumerate(col):
                 if top_found == True and lower_pixel_searched == True:
-                    flood[j,i] = 0
+                    img[j,i] = 0
                 if top_found == True:
                     lower_pixel_searched = True
                 if pixel == 75:
@@ -667,7 +670,7 @@ def get_border(img,side):
             j=len(col)-1
             for pixel in col:
                 if top_found == True and lower_pixel_searched == True:
-                    flood[j,i] = 0
+                    img[j,i] = 0
                 if top_found == True:
                     lower_pixel_searched = True
                 if pixel == 75:
@@ -675,7 +678,7 @@ def get_border(img,side):
                 j-=1
             i+=1
     
-    return flood
+    return img
 
 def find_closest_edge(point,edges):
     for i in range(0,15):
