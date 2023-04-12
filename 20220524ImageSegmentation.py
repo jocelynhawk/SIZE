@@ -13,6 +13,7 @@ from tkinter import *
 from PIL import Image, ImageTk
 from random import randint
 from scipy.optimize import curve_fit
+import pandas as pd
 
 
 #PARAMETERS:
@@ -26,6 +27,20 @@ side = 'dorsal'
 muscle = 'APB'
 
 
+#Convert points from 2D image coordinates to 3D robot coordinates
+def ICS_to_RCS(pt,TRI):
+    point = pt * 0.066666666667
+    point = np.array(point)
+    if point.shape[0]>2:
+        point=np.append(point,[1])
+    else:
+        point = np.append(point,[0,1])
+    point_RCS = np.delete(np.matmul(TRI,point),3)
+    point_RCS = pd.DataFrame([point_RCS[0],point_RCS[1],point_RCS[2]],columns=['X','Y','Z'])
+
+
+    return point_RCS
+
 class Scan:
     def __init__(self,folder,start,stop,seg_range):
         self.seg_range=[x-start for x in seg_range]
@@ -36,7 +51,9 @@ class Scan:
         self.scan_folder = subject_path + folder
         self.files = os.listdir(self.scan_folder)
         self.images=[]
-        self.skin_points = pd.DataFrame(columns='points')
+        self.skin_points = pd.DataFrame(columns=['X','Y','Z'])
+        self.volar_points = pd.DataFrame(columns=['X','Y','Z'])
+        self.dorsal_points = pd.DataFrame(columns=['X','Y','Z'])
         for i in range(self.start,self.stop):
             filename = self.scan_folder + '//' + self.files[i]
             img = rgb2gray(io.imread(filename))[60:550,528:1250]
@@ -50,11 +67,9 @@ class Scan:
             img.get_skin_surf()
             if img.skin_surf[0,0]==0 and img.skin_pts_RCS[0,0] == 0:
                 continue
-            try:
-                self.skin_points = np.vstack([self.skin_points,img.skin_pts_RCS])
-            except:
-                self.skin_points = np.array(img.skin_pts_RCS)
+            self.skin_points._append(img.skin_pts_RCS)
         self.get_max_skin_point()
+        
 
     def segment_images(self):
         for img in self.images[self.seg_range[0]:self.seg_range[1]]:
@@ -65,16 +80,12 @@ class Scan:
 
             #create array of all RCS points in this scan
             if current_img.skip_v == False:
-                try:
-                    self.volar_points = np.vstack([self.volar_points,current_img.volar_pts_RCS])
-                except:
-                    self.volar_points = np.array(current_img.volar_pts_RCS)
+                self.volar_points._append(current_img.volar_pts_RCS)
+
 
             if current_img.skip_d == False:
-                try:
-                    self.dorsal_points = np.vstack([self.dorsal_points,current_img.dorsal_pts_RCS]) 
-                except:
-                    self.dorsal_points = np.array(current_img.dorsal_pts_RCS)
+                self.dorsal_points._append(current_img.dorsal_pts_RCS) 
+
 
     #Fits skin points to 3D polynomial and gets the max point (highest z-value)
     def get_max_skin_point(self):
@@ -127,7 +138,8 @@ class Scan:
             self.hyst_lowt = HYST_lowt_vals[scan_n]
             self.hyst_hight = HYST_hight_vals[scan_n]
             self.current_img_index=len(images)
-            self.skin_surf = pd.DataFrame(columns=['points'])
+            self.skin_surf = pd.DataFrame(columns=['X','Y'])
+            self.skin_pts_RCS = pd.DataFrame(columns=['X','Y','Z'])
 
         #segment image
         def segment(self,shift,muscles,seg_range):
@@ -220,7 +232,7 @@ class Scan:
             for i,col in enumerate(hyst_T):
                 bright_found=False
                 for j,pixel in enumerate(col):
-                    pixel_coord = [i,j]
+                    pixel_coord = pd.DataFrame([i,j],columns=['X','Y'])
                     if j<80:
                         j+=1
                         continue
@@ -228,18 +240,18 @@ class Scan:
                         #only add to skin_surf if j is within 10 pixels of last j (skips bright particles/noise above skin surface)
                         if self.skin_surf.shape[0]>0:
                             if abs(self.skin_surf[-1,1]-j)<20:
-                                self.skin_surf.append(np.array(pixel_coord,ndmin=2))
+                                self.skin_surf._append(pixel_coord,ignore_index=True)
+                                self.skin_pts_RCS._append(ICS_to_RCS([i,j],self.TRI))
                                 bright_found=True
                         else:
-                            self.skin_surf.append(np.array(pixel_coord,ndmin=2))
+                            self.skin_surf._append(pixel_coordignore_index=True)
+                            self.skin_pts_RCS._append(ICS_to_RCS([i,j],self.TRI))
                             bright_found=True
 
             try:
                 #get max skin surface point
-                skin_peak_y = np.min(self.skin_surf[:,1])
-                skin_peak_x = self.skin_surf[np.where(self.skin_surf[:,1]==skin_peak_y)[0][0]]    
-                self.skin_peak = np.append(skin_peak_x,skin_peak_y)
-                self.skin_pts_RCS = self.ICS_to_RCS(self.skin_surf)
+                skin_peakidx = pd.idxmin(self.skin_surf['Y'])
+                self.skin_peak = self.skin_surf.iloc(skin_peakidx)
             except:
                 self.skin_surf, self.skin_pts_RCS = np.array([0,0],ndmin=2), np.array([0,0,0],ndmin=2)
         
@@ -278,22 +290,20 @@ class Scan:
                     if i > upper_bound:
                         pixel = canny[i,point[0]]
                         if pixel == True:
-                            volar_point = [point[0],i]
+                            volar_point = pd.DataFrame([point[0],i],columns=['X','Y'])
                             break
                     i+=-1
                     if j < lower_bound:
                         pixel = canny[j,point[0]]
                         if pixel == True:
-                            volar_point = [point[0],j]
+                            volar_point = pd.DataFrame([point[0],j],columns=['X','Y'])
                             break
                     j+=1
                 
                 #If border point found, add it to volar_pts
                 if pixel == True:
-                    try:
-                        self.volar_pts = np.vstack([self.volar_pts,volar_point])
-                    except:
-                        self.volar_pts = np.array(volar_point,ndmin=2)                    
+                    self.volar_pts._append(volar_point)    
+
 
             self.muscle_f = np.polyfit(self.volar_pts[:,0],self.volar_pts[:,1],deg = 2)
 
@@ -354,93 +364,28 @@ class Scan:
 
                 #Find closest edge points to each clicked point
                 #calculate distance between every clicked point and every edge coord, and find edge closest to clicked point
-                for point in clicked_points:
-                    distances = []
-                    for edge in edge_coords:
-                        distance=np.linalg.norm(point - edge)
-                        distances.append(distance)
-                    #only accept edge coord if within 15 pixels of the clicked point
-                    if min(distances)<15:
-                        closest = edge_coords[distances.index(min(distances))]
-                        try:
-                            closest_edges = np.vstack([closest_edges,closest])
-                        except:
-                            closest_edges = np.array(closest,ndmin=2)
-
-                    try:
-                        closest_edges
-                    except NameError:
-                        print("redo: no close edges found.1")
-                        self.redo = True
-                        return
-                            
+                closest_edges = pd.DataFrame(columns = ['X','Y'])
+                img_borders=[]
                 #Convert binary Canny Edge image to grayscale image
-                edges_gs = binary_to_gs(edges)
-
-
-                #Apply flood filter for each point
-                for edge in closest_edges:
-                    try:
-                        if flood[edge[1],edge[0]] == 75:
-                            break
-                        flood = flood_fill(flood,(edge[1],edge[0]),75)
-                    except:
-                        flood = flood_fill(edges_gs,(edge[1],edge[0]),75)
-
-
-                #Get top points only
-                flood_T = np.transpose(flood)
-                i=0
-                if side == 'dorsal' or muscle == 'APB':
-                    for col in flood_T:
-                        top_found = False
-                        lower_pixel_searched = False
-                        j=0
-                        for pixel in col:
-                            if top_found == True and lower_pixel_searched == True:
-                                flood[j,i] = 0
-                            if top_found == True:
-                                    lower_pixel_searched = True
-                            if pixel == 75:
-                                top_found = True
-                            j+=1
-                        i+=1
-
-                #gets bottom points only
-                else:
-                    for col in flood_T:
-                        col = np.flip(col)
-                        top_found = False
-                        lower_pixel_searched = False
-                        j=len(col)-1
-                        for pixel in col:
-                            if top_found == True and lower_pixel_searched == True:
-                                flood[j,i] = 0
-                            if top_found == True:
-                                    lower_pixel_searched = True
-                            if pixel == 75:
-                                top_found = True
-                            j-=1
-                        i+=1
-
-                #get xy values of dorsal points and calculate distance from each point to the muscle peak
-                self.dorsal_pts = array_to_xy(flood,75)
-
-                #get list of separate edges
-                edges_sep=[]
-                for point in self.dorsal_pts:
-                    if flood[point[1],point[0]] == 95:
+                edges_remember = binary_to_gs(edges)
+                for n,point in enumerate(clicked_points):
+                    edges_gs = binary_to_gs(edges)
+                    closest_edges._append(find_closest_edge(point,edges))
+                    edge = find_closest_edge(point,edges)
+                    if edges_remember[edge[1],edge[0]] == 75:
+                        i-=1
                         continue
-                    flood = flood_fill(flood,(point[1],point[0]),85)
-                    edges_sep.append(flood)
-                    flood = flood_fill(flood,(point[1],point[0]),95)
-                edges_sepxy=[]
-                close_edges=[]
-                for edge in edges_sep:
-                    edgexy = array_to_xy(edge,85)
-                    close_edges.append(edgexy)
-                    edges_sepxy.append(edgexy + [self.x_adj,self.y_adj])
-                self.b2mpeak_sep = edges_sepxy
+                    edges_remember = flood_fill(edges_remember,(edge[1],edge[0]),75)
+                    edges_gs = flood_fill(edges_gs,(edge[1],edge[0]),75)
+                    img_borders.append(get_border(edges_gs,side))
+                    edge_pts = array_to_xy(edges_gs,75)
+                    edge_pts['edge_n'] = n
+                    self.dorsal_pts._append(edge_pts)
+
+                if closest_edges.shape[0]<1:
+                    print("redo: no close edges found.")
+                    self.redo = True
+                    return
 
             else:
                 adjust = [self.x_adj,self.y_adj]
@@ -544,8 +489,8 @@ class Scan:
                     self.b2mpeak_sep.append(edgesep)
 
             
-            dmin = self.dorsal_pts[np.where(self.dorsal_pts[:,0] == np.min(self.dorsal_pts[:,0]))][0]
-            dmax = self.dorsal_pts[np.where(self.dorsal_pts[:,0] == np.max(self.dorsal_pts[:,0]))][0]
+            dmin = self.dorsal_pts[self.dorsal_pts.idxmin(self.dorsal_pts['Y'])]
+            dmax = self.dorsal_pts[self.dorsal_pts.idxmax(self.dorsal_pts['Y'])]
             dminmax=[dmin,dmax]
             try:
                 vmin = interp_vp[np.where(abs(interp_vp[:,1]-dmin[1])<10)]
@@ -560,7 +505,7 @@ class Scan:
             vminmax=[vmin,vmax]
             #close_edges[np.where(close_edges[:,0,:]==np.min(close_edges[:,0,:]))]
             emins,emaxes=[],[]
-            for edge in close_edges:
+            for edge_n in range(0,n+1):
                 emin,emax = np.min(edge[:,0]),np.max(edge[:,0])
                 emins.append(emin)
                 emaxes.append(emax)
@@ -697,24 +642,48 @@ class Scan:
 
             return hyst
 
-        #Convert points from 2D image coordinates to 3D robot coordinates
-        def ICS_to_RCS(self,points):
-            TRI = self.TRI
-            pts_ICS = points * 0.066666666667
-            for point in pts_ICS:
-                if point.shape[0]>2:
-                    point=np.append(point,[1])
-                else:
-                    point = np.append(point,[0,1])
-                point_RCS = np.delete(np.matmul(TRI,point),3)
-                try:
-                    pts_RCS = np.vstack([pts_RCS,point_RCS])
-                except:
-                    pts_RCS = np.array(point_RCS,ndmin=2)
 
-            return pts_RCS
+def get_border(img,side):
+    #Get top points only
+    flood_T = np.transpose(img)
+    if side == 'dorsal':
+        for i,col in enumerate(flood_T):
+            top_found = False
+            lower_pixel_searched = False
+            for j,pixel in enumerate(col):
+                if top_found == True and lower_pixel_searched == True:
+                    flood[j,i] = 0
+                if top_found == True:
+                    lower_pixel_searched = True
+                if pixel == 75:
+                    top_found = True
 
+    #gets bottom points only
+    else:
+        for col in flood_T:
+            col = np.flip(col)
+            top_found = False
+            lower_pixel_searched = False
+            j=len(col)-1
+            for pixel in col:
+                if top_found == True and lower_pixel_searched == True:
+                    flood[j,i] = 0
+                if top_found == True:
+                    lower_pixel_searched = True
+                if pixel == 75:
+                    top_found = True
+                j-=1
+            i+=1
+    
+    return flood
 
+def find_closest_edge(point,edges):
+    for i in range(0,15):
+        for j in range(-i-1,i+1):
+            for k in [-i-1,i+1]:
+                if point == True:
+                    return pd.DataFrame([k,j],columns=['X','Y'])
+    return pd.DataFrame(columns=['X','Y'])
 
 
 
@@ -775,22 +744,13 @@ def binary_to_gs(img):
 
 def array_to_xy(img,val):
     #convert table data to a two column array of xy values
-    i=0
-    for row in img:
-        j=0
-        for pixel in row:
+    xy_coords=pd.DataFrame(columns=['X','Y'])
+    for i,row in enumerate(img):
+        for j,pixel in enumerate(row):
             if pixel == val:
-                xy = np.array([j,i],ndmin=2)
-                try:
-                    xy_coords = np.vstack([xy_coords,xy])
-                except:
-                    xy_coords = xy
-            j+=1
-        i+=1
-    try:
-        xy_coords
-    except:
-        xy_coords = np.array([0,0],ndmin=2)
+                xy = pd.DataFrame([j,i],columns=['X','Y'])
+                xy_coords._append(xy)
+
     return xy_coords
 
 def get_TRI_array(TRE_folder,TEI_filename):
