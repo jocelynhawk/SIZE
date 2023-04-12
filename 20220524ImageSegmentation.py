@@ -36,6 +36,7 @@ class Scan:
         self.scan_folder = subject_path + folder
         self.files = os.listdir(self.scan_folder)
         self.images=[]
+        self.skin_points = pd.DataFrame(columns='points')
         for i in range(self.start,self.stop):
             filename = self.scan_folder + '//' + self.files[i]
             img = rgb2gray(io.imread(filename))[60:550,528:1250]
@@ -126,6 +127,7 @@ class Scan:
             self.hyst_lowt = HYST_lowt_vals[scan_n]
             self.hyst_hight = HYST_hight_vals[scan_n]
             self.current_img_index=len(images)
+            self.skin_surf = pd.DataFrame(columns=['points'])
 
         #segment image
         def segment(self,shift,muscles,seg_range):
@@ -214,34 +216,29 @@ class Scan:
             for i in indices_bright:
                 hyst[i[0],i[1]] = False
 
-            i=0
             hyst_T = np.transpose(hyst)
-            for col in hyst_T:
-                j=0
+            for i,col in enumerate(hyst_T):
                 bright_found=False
-                for pixel in col:
+                for j,pixel in enumerate(col):
                     pixel_coord = [i,j]
                     if j<80:
                         j+=1
                         continue
                     if pixel == True and bright_found == False:
-                        try:
-                            #only add to skin_surf if j is within 10 pixels of last j (skips bright particles/noise above skin surface)
+                        #only add to skin_surf if j is within 10 pixels of last j (skips bright particles/noise above skin surface)
+                        if self.skin_surf.shape[0]>0:
                             if abs(self.skin_surf[-1,1]-j)<20:
-                                self.skin_surf = np.vstack([self.skin_surf,pixel_coord])
+                                self.skin_surf.append(np.array(pixel_coord,ndmin=2))
                                 bright_found=True
-                        except:
-                            self.skin_surf = np.array(pixel_coord,ndmin=2)
+                        else:
+                            self.skin_surf.append(np.array(pixel_coord,ndmin=2))
                             bright_found=True
-                    j+=1
-                i+=1
 
             try:
                 #get max skin surface point
                 skin_peak_y = np.min(self.skin_surf[:,1])
                 skin_peak_x = self.skin_surf[np.where(self.skin_surf[:,1]==skin_peak_y)[0][0]]    
                 self.skin_peak = np.append(skin_peak_x,skin_peak_y)
-
                 self.skin_pts_RCS = self.ICS_to_RCS(self.skin_surf)
             except:
                 self.skin_surf, self.skin_pts_RCS = np.array([0,0],ndmin=2), np.array([0,0,0],ndmin=2)
