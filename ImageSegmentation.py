@@ -362,37 +362,40 @@ class Scan:
         def get_border_by_tracking(self,prev_img,prev_points):
             edge0 = feature.canny(prev_img,CANNY_sigma,low_threshold = CANNY_lowt, high_threshold = CANNY_hight)     
             edge1 = feature.canny(self.img,CANNY_sigma,low_threshold = CANNY_lowt, high_threshold = CANNY_hight) 
-            edge0, edge1 = binary_to_gs(edge0), binary_to_gs(edge1)
-            edge0_u8, edge1_u8 = (edge0/255).astype('uint8'), (edge1/255).astype('uint8')
+            edge0_u8, edge1_u8 = binary_to_gs(edge0), binary_to_gs(edge1)
+            edge0_u8, edge1_u8 = (edge0_u8/255).astype('uint8'), (edge1_u8/255).astype('uint8')
 
-            p0 = prev_points.to_numpy(ndmin=3,dtype=np.float32)
+            p0 = prev_points.to_numpy(dtype=np.float32)
 
-            p1 = cv2.calcOpticalFlowPyrLK(edge0_u8,edge1_u8,p0,None)
+            p1 = cv2.calcOpticalFlowPyrLK(edge0_u8,edge1_u8,p0,None)[0]
 
             points = []
             for p in p1:
-                point = find_closest_edge()
+                p=[int(p[0]),int(p[1])]
+                point = find_closest_edge(p,edge1)
                 if len(points) < 0:
                     for pt in points:
                         if pt == point:
                             break
                     if pt == point:
                         continue
-                points.append[point]
+                points.append(point)
 
             img_borders=[]
             #Convert binary Canny Edge image to grayscale image
             edges_remember = binary_to_gs(edge0)
-            for n,edge in enumerate(points):
-                if edges_remember[edge[1],edge[0]] == 75:
+            i=0
+            for edge in points:
+                if edges_remember[edge[0],edge[1]] == 75:
                     i-=1
                     continue
-                edges_remember = flood_fill(edges_remember,(edge[1],edge[0]),75)
-                edges_gs = flood_fill(edges_gs,(edge[1],edge[0]),75)
+                edges_remember = flood_fill(edges_remember,(edge[0],edge[1]),75)
+                edges_gs = flood_fill(edge0,(edge[0],edge[1]),75)
                 img_borders.append(get_border(edges_gs,side))
                 edge_pts = array_to_xy(edges_gs,75)
-                edge_pts['edge_n'] = n
                 self.dorsal_pts.append(edge_pts)
+                self.dorsal_pts['edge_n'] = int(i)
+                i+=1
             self.dorsal_pts = self.dorsal_pts.set_index('edge_n')
 
 
@@ -425,16 +428,6 @@ class Scan:
             if xmin<0:
                 xmin=0
             print(xmin,xmax,ymin,ymax)
-
-        
-
-            #delete points from muscle and skin surf that are cropped out
-            """if muscle == 'APB':
-                self.volar_pts = np.delete(self.volar_pts,np.where(self.volar_pts[:,1]>ymax),axis=0)
-                self.volar_pts = np.delete(self.volar_pts,np.where(self.volar_pts[:,0]<xmin),axis=0)
-                self.volar_pts = np.delete(self.volar_pts,np.where(self.volar_pts[:,0]>xmax),axis=0)
-            self.skin_surf = self.skin_surf,np.where(self.skin_surf[:,1]>ymax),axis=0)
-            self.skin_surf = np.delete(self.skin_surf,np.where(self.skin_surf[:,0]<xmin),axis=0)"""
 
             self.cropped_img = self.img[ymin:ymax,xmin:xmax]
             self.x_adj = xmin
@@ -703,6 +696,9 @@ def main():
     np.savetxt(subject_path + muscle + side + 'points.txt',dorsal_pts)
 
 
+
+
+"""
 def test():
     TRI_all = get_TRI_array('TRE/','TEI.txt')
     scan2 = Scan('2',6,42,[20,35],[0],[0],TRI_all)
@@ -716,6 +712,6 @@ def test():
     plt.show()
     print(image.dorsal_pts)
 
-    scan2.images[11].get_border_by_tracking(image,image.dorsal_pts)
+    scan2.images[11].get_border_by_tracking(image.img,image.dorsal_pts)
     
-test()
+test()"""
