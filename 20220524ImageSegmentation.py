@@ -13,6 +13,7 @@ from tkinter import *
 from PIL import Image, ImageTk
 from random import randint
 from scipy.optimize import curve_fit
+import pandas as pd
 
 
 #PARAMETERS:
@@ -45,17 +46,18 @@ class Scan:
 
     #Get volar skin points 
     def skin_reconstruct(self):
+        self.skin_points = pd.DataFrame(columns=['X','Y','Z'])
         for img in self.images:
             img.get_skin_surf()
             if img.skin_surf[0,0]==0 and img.skin_pts_RCS[0,0] == 0:
                 continue
-            try:
-                self.skin_points = np.vstack([self.skin_points,img.skin_pts_RCS])
-            except:
-                self.skin_points = np.array(img.skin_pts_RCS)
+            self.skin_points.append(img.skin_pts_RCS)
         self.get_max_skin_point()
 
     def segment_images(self):
+        self.volar_points=pd.DataFrame(columns=['X','Y','Z'])
+        self.dorsal_points=pd.DataFrame(columns=['X','Y','Z'])
+
         for img in self.images[self.seg_range[0]:self.seg_range[1]]:
             current_img=img
             self.muscles = current_img.segment(self.shift,self.muscles,self.seg_range)
@@ -64,16 +66,10 @@ class Scan:
 
             #create array of all RCS points in this scan
             if current_img.skip_v == False:
-                try:
-                    self.volar_points = np.vstack([self.volar_points,current_img.volar_pts_RCS])
-                except:
-                    self.volar_points = np.array(current_img.volar_pts_RCS)
+                self.volar_points.append(current_img.volar_pts_RCS)
 
             if current_img.skip_d == False:
-                try:
-                    self.dorsal_points = np.vstack([self.dorsal_points,current_img.dorsal_pts_RCS]) 
-                except:
-                    self.dorsal_points = np.array(current_img.dorsal_pts_RCS)
+                self.dorsal_points.append(current_img.dorsal_pts_RCS)
 
     #Fits skin points to 3D polynomial and gets the max point (highest z-value)
     def get_max_skin_point(self):
@@ -216,35 +212,30 @@ class Scan:
 
             i=0
             hyst_T = np.transpose(hyst)
+            self.skin_surf=pd.DataFrame(columns=['X','Y'])
             for col in hyst_T:
                 j=0
                 bright_found=False
                 for pixel in col:
-                    pixel_coord = [i,j]
+                    pixel_coord = pd.DataFrame([i,j])
                     if j<80:
                         j+=1
                         continue
                     if pixel == True and bright_found == False:
-                        try:
+                        if len(self.skin_surf) > 1:
                             #only add to skin_surf if j is within 10 pixels of last j (skips bright particles/noise above skin surface)
                             if abs(self.skin_surf[-1,1]-j)<20:
-                                self.skin_surf = np.vstack([self.skin_surf,pixel_coord])
+                                self.skin_surf.append(pixel_coord)
                                 bright_found=True
-                        except:
-                            self.skin_surf = np.array(pixel_coord,ndmin=2)
-                            bright_found=True
+
                     j+=1
                 i+=1
 
-            try:
-                #get max skin surface point
-                skin_peak_y = np.min(self.skin_surf[:,1])
-                skin_peak_x = self.skin_surf[np.where(self.skin_surf[:,1]==skin_peak_y)[0][0]]    
-                self.skin_peak = np.append(skin_peak_x,skin_peak_y)
 
-                self.skin_pts_RCS = self.ICS_to_RCS(self.skin_surf)
-            except:
-                self.skin_surf, self.skin_pts_RCS = np.array([0,0],ndmin=2), np.array([0,0,0],ndmin=2)
+            #get max skin surface point
+            skin_peak_idx = self.skin_surf[['Y']].idxmin(self.skin_surf['Y'])
+            self.skin_peak = self.skin_surf.iloc[[skin_peak_idx]]
+            self.skin_pts_RCS = self.ICS_to_RCS(self.skin_surf)
         
         #Get the volar muscle border points
         def get_muscle_surf(self):
@@ -819,8 +810,8 @@ def get_TRI_array(TRE_folder,TEI_filename):
     return TRI_all
 
 
-subject_path = 'C:\\Users\\jocel\\OneDrive\\Desktop\\20220607 Formal Data Collection\\Sub00000007\\Trial 2\\'
-TEI_path = 'C:\\Users\\jocel\\OneDrive\\Desktop\\20220607 Formal Data Collection\\Sub00000007\\TEI.txt'
+subject_path = '20220607 Formal Data Collection\\Sub00000007\\Trial 2\\'
+TEI_path = '20220607 Formal Data Collection\\Sub00000007\\TEI.txt'
 APB_path = subject_path + 'APB Dense Point Cloudz.txt'
 FPB_path = subject_path + 'FPB Dense Point Cloudz.txt'
 OPP_path = subject_path + 'OPP Dense Point Cloudz.txt'
