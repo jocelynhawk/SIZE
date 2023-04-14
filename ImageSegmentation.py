@@ -28,10 +28,10 @@ side = 'dorsal'
 muscle = 'FPB'
 
 subject_path = 'Trial 1/'
-TEI_path = 'C:\\Users\\jocel\\OneDrive\\Desktop\\20220607 Formal Data Collection\\Sub00000007\\TEI.txt'
-APB_path = subject_path + 'APB Dense Point Cloudz.txt'
-FPB_path = subject_path + 'FPB Dense Point Cloudz.txt'
-OPP_path = subject_path + 'OPP Dense Point Cloudz.txt'
+TEI_path = 'TEI.txt'
+APB_path = subject_path + 'APB Dense Point Cloud.txt'
+FPB_path = subject_path + 'FPB Dense Point Cloud.txt'
+OPP_path = subject_path + 'OPP Dense Point Cloud.txt'
 
 
 
