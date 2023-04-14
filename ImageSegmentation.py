@@ -25,30 +25,25 @@ HYST_lowt_vals = [0.35,0.35,0.3,0.35]
 HYST_hight_vals = [0.65,0.68,0.6,0.63]
 cutoff_radius = 10
 side = 'dorsal'
-muscle = 'APB'
+muscle = 'FPB'
+
+subject_path = 'Trial 1/'
+TEI_path = 'C:\\Users\\jocel\\OneDrive\\Desktop\\20220607 Formal Data Collection\\Sub00000007\\TEI.txt'
+APB_path = subject_path + 'APB Dense Point Cloudz.txt'
+FPB_path = subject_path + 'FPB Dense Point Cloudz.txt'
+OPP_path = subject_path + 'OPP Dense Point Cloudz.txt'
 
 
-#Convert points from 2D image coordinates to 3D robot coordinates
-def ICS_to_RCS(pt,TRI):
-    point = pt * 0.066666666667
-    point = np.array(point)
-    if point.shape[0]>2:
-        point=np.append(point,[1])
-    else:
-        point = np.append(point,[0,1])
-    point_RCS = np.delete(np.matmul(TRI,point),3)
-    point_RCS = pd.DataFrame([point_RCS[0],point_RCS[1],point_RCS[2]],columns=['X','Y','Z'])
 
-
-    return point_RCS
 
 class Scan:
-    def __init__(self,folder,start,stop,seg_range):
+    def __init__(self,folder,start,stop,seg_range,current_muscle,other_muscles,TRI_all):
+        self.current_muscle = current_muscle
         self.seg_range=[x-start for x in seg_range]
-        self.muscles = muscles
+        self.muscles = other_muscles
         self.start = start
         self.stop = stop
-        self.folder = folder
+        self.folder =  folder
         self.scan_folder = subject_path + folder
         self.files = os.listdir(self.scan_folder)
         self.images=[]
@@ -74,6 +69,11 @@ class Scan:
 
     def segment_images(self):
         for i,img in enumerate(self.images[self.seg_range[0]:self.seg_range[1]]):
+            print("scan: ", self.folder, "image: ",self.start+i," out of ",self.stop)
+            if muscle == 'APB':
+                img.get_muscle_surf()
+            img.project_muscle(self.current_muscle,self.other_muscles)
+            img.crop()
             if i == 0 or img.redo == True:
                 img.get_border_by_click()
             else:
@@ -145,87 +145,50 @@ class Scan:
             self.n=scan_n
             self.hyst_lowt = HYST_lowt_vals[scan_n]
             self.hyst_hight = HYST_hight_vals[scan_n]
-            self.current_img_index=len(images)
-            self.skin_surf = pd.DataFrame(columns=['X','Y'])
-            self.skin_pts_RCS = pd.DataFrame(columns=['X','Y','Z'])
-
-        #segment image
-        def segment(self,shift,muscles,seg_range):
-            print("scan: ", self.n, "image: ",self.current_img_index," out of ",seg_range[1])
-
-            self.seg_range=seg_range
-            self.muscles = muscles
-            self.shift=shift
-
-            self.project_muscle()
-            self.get_volar_pts()
-
-            self.redo,first,self.skip_d,self.skip_v = False,True,False,False
-            while self.redo == True or first == True:
-                self.get_dorsal_pts()
-                first = False
-                if self.redo == False:
-                    self.show_plot()
-                if self.skip_d == True or self.skip_v == True:
-                    break
-            
-            #APB uses volar muscle points
-            if muscle =='APB':
-                if self.volar_pts.shape[0]>1:
-                    self.volar_pts_RCS = self.ICS_to_RCS(self.volar_pts)
-            self.dorsal_pts_RCS = self.ICS_to_RCS(self.dorsal_pts)
-            return self.muscles
+            self.skin_surf = []
+            self.skin_pts_RCS = []
+            self.redo,self.skip_d,self.skip_v = False,False,False
+            self.x_adj, self.y_adj = 0,0
+            self.dorsal_pts = pd.DataFrame(columns=['X','Y'])
 
         #Show previous muscles on ultrasound image
-        def project_muscle(self):
+        def project_muscle(self,current_muscle,muscles):
+
+            def RCS_to_ICS(point,TIR):
+                point = np.append(point,[1])
+                point_ICS = np.delete(np.matmul(TIR,point),3)
+                point_ICS = np.delete(point_ICS,2)/0.0666666667
+                
+                return point_ICS
+
             TRI = self.TRI
             TIR = np.linalg.inv(TRI)
             shifted_current = current_muscle + self.shift
-            for muscle in self.muscles:
+            for muscle in muscles:
                 ind_del = []
                 i=0
                 shifted_muscle = muscle + self.shift
 
                 #Convert muscle points from 3D CS to 2D Image CS
+                other_musc = []
                 for point in shifted_muscle:
-                    point = np.append(point,[1])
-                    point_ICS = np.delete(np.matmul(TIR,point),3)
-                    if abs(point_ICS[2])<0.1: 
+                    point_ICS = RCS_to_ICS(point,TIR)
+                    if abs(point_ICS[2])<5: 
                         point_ICS = np.delete(point_ICS,2)/0.066666666666666667                    
-                        try:
-                            self.pts_ICS = np.vstack([self.pts_ICS,point_ICS])
-                        except:
-                            self.pts_ICS = np.array(point_ICS,ndmin=2)
+                        other_musc.append(point_ICS)
                         ind_del.append(i)
                     i += 1
                 if len(ind_del)>0:
                     muscle = np.delete(muscle,ind_del,axis=0)
-                try:
-                    self.pts_ICS
-                except:
-                    self.pts_ICS = np.array([0,0],ndmin=2)
+                self.pts_ICS = np.array(other_musc,ndmin=2)
 
+            curr_musc=[]
             #Get muscle points present in the current image (where Z~=0)                        
             for point in shifted_current:
-                point = np.append(point,[1])
-                point_ICS = np.delete(np.matmul(TIR,point),3)
-                if abs(point_ICS[2])<0.1: 
-                    point_ICS = np.delete(point_ICS,2)/0.0666666667
-                    try:
-                        self.current_pts_ICS = np.vstack([self.current_pts_ICS,point_ICS])
-                    except:
-                        self.current_pts_ICS = np.array(point_ICS,ndmin=2)    
-
-            #If no muscle points in current image, set = [0,0]
-            try:
-                self.current_pts_ICS
-            except:
-                self.current_pts_ICS = np.array([0,0],ndmin=2)
-
-        def get_volar_pts(self):
-            if muscle == 'APB':
-                self.get_muscle_surf()
-            self.crop_image()
+                point_ICS = RCS_to_ICS(point)
+                if abs(point_ICS[2])<5: 
+                    curr_musc.append(point_ICS)
+            self.current_pts_ICS=np.array(curr_musc,ndmin=2) 
 
         def get_skin_surf(self):
             hyst = self.apply_hyst_thresh()
@@ -240,28 +203,28 @@ class Scan:
             for i,col in enumerate(hyst_T):
                 bright_found=False
                 for j,pixel in enumerate(col):
-                    pixel_coord = pd.DataFrame([i,j],columns=['X','Y'])
+                    pixel_coord = [i,j]
                     if j<80:
                         j+=1
                         continue
                     if pixel == True and bright_found == False:
                         #only add to skin_surf if j is within 10 pixels of last j (skips bright particles/noise above skin surface)
-                        if self.skin_surf.shape[0]>0:
-                            if abs(self.skin_surf[-1,1]-j)<20:
-                                self.skin_surf._append(pixel_coord,ignore_index=True)
-                                self.skin_pts_RCS._append(ICS_to_RCS([i,j],self.TRI))
+                        if len(self.skin_surf)>0:
+                            if abs(self.skin_surf[-1][1]-j)<20:
+                                self.skin_surf.append(pixel_coord)
+                                self.skin_pts_RCS.append(ICS_to_RCS([i,j],self.TRI))
                                 bright_found=True
                         else:
-                            self.skin_surf._append(pixel_coordignore_index=True)
-                            self.skin_pts_RCS._append(ICS_to_RCS([i,j],self.TRI))
+                            self.skin_surf.append(pixel_coord)
+                            self.skin_pts_RCS.append(ICS_to_RCS([i,j],self.TRI))
                             bright_found=True
+            self.skin_surf = pd.DataFrame(self.skin_surf,columns = ['X','Y'])
+            self.skin_pts_RCS = pd.DataFrame(self.skin_pts_RCS,columns = ['X','Y','Z'])
 
-            try:
-                #get max skin surface point
-                skin_peakidx = self.skin_surf['Y'].idxmin()
-                self.skin_peak = self.skin_surf.iloc(skin_peakidx)
-            except:
-                self.skin_surf, self.skin_pts_RCS = np.array([0,0],ndmin=2), np.array([0,0,0],ndmin=2)
+            #get max skin surface point
+            skin_peakidx = self.skin_surf['Y'].idxmin()
+            self.skin_peak = self.skin_surf.loc[skin_peakidx]
+
         
         #Get the volar muscle border points
         def get_muscle_surf(self):
@@ -270,18 +233,17 @@ class Scan:
             hyst_T = np.transpose(hyst)
 
             #Go along the skin surface and search for the muscle surface below it
+            l2d_edge=[]
             for point in self.skin_surf:
                 j=point[0]
                 i=point[1]
                 for pixel in hyst_T[j,point[1]:]:
                     if pixel == False:
                         pixel_coord = [j,i]
-                        try:
-                            l2d_edge = np.vstack([l2d_edge,pixel_coord])
-                        except:
-                            l2d_edge = np.array(pixel_coord,ndmin=2)
+                        l2d_edge.append(pixel_coord)
                         break
                     i+=1
+            l2d_edge = np.array(l2d_edge,ndmin=2)
 
             #Apply canny edge detection
             canny = feature.canny(self.img,5.5,low_threshold = 0.05, high_threshold = 0.1)
@@ -324,13 +286,12 @@ class Scan:
             else: 
                 f=self.muscle_f
             yi = np.polyval(f,self.volar_pts[:,0])
-            i=0
+ 
             inidices_to_del = []
-            for y in self.volar_pts[:,1]:
+            for i,y in enumerate(self.volar_pts['Y']):
                 if abs(y-yi[i])>45:
                     inidices_to_del.append(i)
-                i+=1
-            self.volar_pts = np.delete(self.volar_pts,inidices_to_del,axis=0)
+            self.volar_pts = self.volar_pts.drop(inidices_to_del,axis=0)
 
         def get_border_by_click(self):
             #set img to cropped img and adjust volar points to fit cropped image
@@ -345,55 +306,58 @@ class Scan:
                 yi = f(xi)
                 interp_vp = np.stack([xi,yi],axis=1)
 
-            img = self.cropped_img
+            img = self.img
 
             #Apply Canny Edge filter
             edges = feature.canny(img,CANNY_sigma,low_threshold = CANNY_lowt, high_threshold = CANNY_hight)
             self.edges = edges  
             #get points near muscle boundary, if first image: manual selection; otherwise, use previous b2mpeak
             #if manual selection, cutoff is set to volar points. If using previous b2mpeak, cutoff is set to previously selected points
-            if self.images.index(self)==self.seg_range[0] or self.redo == True:
-                clicked_points = click_point_coordinate(img*255)
-                ind = np.lexsort((clicked_points[:,1],clicked_points[:,0]))
-                clicked_points = clicked_points[ind]
+            clicked_points = click_point_coordinate(img*255)
+            ind = np.lexsort((clicked_points[:,1],clicked_points[:,0]))
+            clicked_points = clicked_points[ind]
 
-                if muscle == 'APB':
-                    #Remove points outside of cutoff + cutoff radius
-                    for point in interp_vp:
-                        #skips points if they are outside image bounds. idk why some points are out of bounds. I should fix this
-                        if point[0]>edges.shape[1]-1:
-                            continue
-                        for i in range(0,edges.shape[0]-1):
-                            if i<point[1] - cutoff_radius:
-                                edges[i,int(point[0])]=False 
-
-                edge_coords = array_to_xy(edges,True)
-
-                #Find closest edge points to each clicked point
-                #calculate distance between every clicked point and every edge coord, and find edge closest to clicked point
-                closest_edges = pd.DataFrame(columns = ['X','Y'])
-                img_borders=[]
-                #Convert binary Canny Edge image to grayscale image
-                edges_remember = binary_to_gs(edges)
-                for n,point in enumerate(clicked_points):
-                    edges_gs = binary_to_gs(edges)
-                    closest_edges.append(find_closest_edge(point,edges))
-                    edge = find_closest_edge(point,edges)
-                    if edges_remember[edge[1],edge[0]] == 75:
-                        i-=1
+            if muscle == 'APB':
+                #Remove points outside of cutoff + cutoff radius
+                for point in interp_vp:
+                    #skips points if they are outside image bounds. idk why some points are out of bounds. I should fix this
+                    if point[0]>edges.shape[1]-1:
                         continue
-                    edges_remember = flood_fill(edges_remember,(edge[1],edge[0]),75)
-                    edges_gs = flood_fill(edges_gs,(edge[1],edge[0]),75)
-                    img_borders.append(get_border(edges_gs,side))
-                    edge_pts = array_to_xy(edges_gs,75)
-                    edge_pts['edge_n'] = n
-                    self.dorsal_pts._append(edge_pts)
-                self.dorsal_pts = self.dorsal_pts.set_index('edge_n')
+                    for i in range(0,edges.shape[0]-1):
+                        if i<point[1] - cutoff_radius:
+                            edges[i,int(point[0])]=False 
 
-                if closest_edges.shape[0]<1:
-                    print("redo: no close edges found.")
-                    self.redo = True
-                    return
+            #edge_coords = array_to_xy(edges,True)
+
+            #Find closest edge points to each clicked point
+            #calculate distance between every clicked point and every edge coord, and find edge closest to clicked point
+            closest_edges = []
+            img_borders=[]
+            #Convert binary Canny Edge image to grayscale image
+            edges_remember = binary_to_gs(edges)
+            i=0
+            for point in clicked_points:
+                edges_gs = binary_to_gs(edges)
+                closest_edges.append(find_closest_edge(point,edges))
+                edge = find_closest_edge(point,edges)
+                if len(edge)<2:
+                    continue
+                if edges_remember[edge[0],edge[1]] == 75:
+                    i-=1
+                    continue
+                edges_remember = flood_fill(edges_remember,(edge[0],edge[1]),75)
+                edges_gs = flood_fill(edges_gs,(edge[0],edge[1]),75)
+                img_borders.append(get_border(edges_gs,side))
+                edge_pts = array_to_xy(edges_gs,75)
+                edge_pts['edge_n'] = i
+                self.dorsal_pts = self.dorsal_pts.append(edge_pts)
+                i+=1
+            self.dorsal_pts = self.dorsal_pts.set_index('edge_n')
+
+            if len(closest_edges)<1:
+                print("redo: no close edges found.")
+                self.redo = True
+                return
 
         def get_border_by_tracking(self,prev_img,prev_points):
             edge0 = feature.canny(prev_img,CANNY_sigma,low_threshold = CANNY_lowt, high_threshold = CANNY_hight)     
@@ -403,7 +367,7 @@ class Scan:
 
             p0 = prev_points.to_numpy(ndmin=3,dtype=np.float32)
 
-            p1 = cv2.calcOpticalFlowPyrLK(edge0,edge1,p0,None)
+            p1 = cv2.calcOpticalFlowPyrLK(edge0_u8,edge1_u8,p0,None)
 
             points = []
             for p in p1:
@@ -440,49 +404,37 @@ class Scan:
             self.redo = False
 
         def crop_image(self):
-            ymin, ymax = self.skin_peak[1], self.skin_peak[1]+350 
+            print(self.skin_peak)
+            ymin, ymax = self.skin_peak['Y'], self.skin_peak['Y']+350 
             self.cropped_img = self.img[ymin:ymax,:]
             
             sigma=5
             #blurred = skimage.filters.gaussian(self.cropped_img, sigma=(sigma, sigma), truncate=3.5, multichannel=True)
             blurred = filters.apply_hysteresis_threshold(self.cropped_img,0.4,0.75)
             blurred = binary_to_gs(blurred)
-            min_point = np.where(blurred[:,self.skin_peak[0]]==np.min(blurred[5:,self.skin_peak[0]]))[0][0]
+            min_point = np.where(blurred[:,self.skin_peak['X']]==np.min(blurred[5:,self.skin_peak['X']]))[0][0]
             blurred=blurred*255
-            flood = flood_fill(blurred,(min_point,self.skin_peak[0]),255,tolerance=100-blurred[min_point,self.skin_peak[0]])
-            skin_flood = flood_fill(blurred,(self.skin_peak[1]-ymin,self.skin_peak[0]+2),255,tolerance=35)
+            flood = flood_fill(blurred,(min_point,self.skin_peak['X']),255,tolerance=100-blurred[min_point,self.skin_peak['X']])
+            skin_flood = flood_fill(blurred,(self.skin_peak['Y']-ymin,self.skin_peak['X']+2),255,tolerance=35)
 
             muscle_coords = np.where(flood == 255)
             skin_coords = np.where(skin_flood == 255)
             muscle_tip = np.min(muscle_coords[1])
 
-            xmin, xmax = muscle_tip-10, np.max(self.skin_surf[:,0]-30)
-            if self.n == 2 or self.n==3:
-                xmax = np.max(self.skin_surf[:,0]-60)
-            if self.n == 0 or self.n ==1:
-                xmin = 0
-            if self.n == 0:
-                xmax+=30
-            if self.n == 2 and self.current_img_index < 40 and muscle == 'APB':
-                xmin = 220
-                ymax=ymin+250
-            if self.n == 2 and self.current_img_index < 15 and muscle == 'APB':
-                xmin = 270
-                ymax=ymin+150
-            if self.n == 3 and self.current_img_index < 15 and muscle == 'APB':
-                xmin = 160
-            if self.n == 3:
-                xmax -= 10
+            xmin, xmax = muscle_tip-10, max(self.skin_surf['X'])-30
             if xmin<0:
-                xmin=0            
+                xmin=0
+            print(xmin,xmax,ymin,ymax)
+
+        
 
             #delete points from muscle and skin surf that are cropped out
-            if muscle == 'APB':
+            """if muscle == 'APB':
                 self.volar_pts = np.delete(self.volar_pts,np.where(self.volar_pts[:,1]>ymax),axis=0)
                 self.volar_pts = np.delete(self.volar_pts,np.where(self.volar_pts[:,0]<xmin),axis=0)
                 self.volar_pts = np.delete(self.volar_pts,np.where(self.volar_pts[:,0]>xmax),axis=0)
-            self.skin_surf = np.delete(self.skin_surf,np.where(self.skin_surf[:,1]>ymax),axis=0)
-            self.skin_surf = np.delete(self.skin_surf,np.where(self.skin_surf[:,0]<xmin),axis=0)
+            self.skin_surf = self.skin_surf,np.where(self.skin_surf[:,1]>ymax),axis=0)
+            self.skin_surf = np.delete(self.skin_surf,np.where(self.skin_surf[:,0]<xmin),axis=0)"""
 
             self.cropped_img = self.img[ymin:ymax,xmin:xmax]
             self.x_adj = xmin
@@ -550,6 +502,18 @@ class Scan:
             return hyst
 
 
+#Convert points from 2D image coordinates to 3D robot coordinates
+def ICS_to_RCS(pt,TRI):
+    point = [pt[0]*0.066666666667,pt[1]*0.066666666667]
+    point = np.array(point,ndmin=2)
+    if point.shape[0]>2:
+        point=np.append(point,[1])
+    else:
+        point = np.append(point,[0,1])
+    point_RCS = np.delete(np.matmul(TRI,point),3)
+
+    return point_RCS
+
 def get_border(img,side):
     #Get top points only
     flood_T = np.transpose(img)
@@ -589,8 +553,7 @@ def find_closest_edge(point,edges):
         for j in range(-i-1,i+1):
             for k in [-i-1,i+1]:
                 npoint = [point[0]+i,point[1]+j]
-                print(npoint)
-                if edges[npoint[0],npoint[1]] == True:
+                if edges[npoint[1],npoint[0]] == True:
                     return [npoint[1],npoint[0]]
     return []
 
@@ -653,12 +616,13 @@ def binary_to_gs(img):
 
 def array_to_xy(img,val):
     #convert table data to a two column array of xy values
-    xy_coords=pd.DataFrame(columns=['X','Y'])
+    xy_coords=[]
     for i,row in enumerate(img):
         for j,pixel in enumerate(row):
             if pixel == val:
-                xy = pd.DataFrame([j,i],columns=['X','Y'])
-                xy_coords._append(xy)
+                xy = [j,i]
+                xy_coords.append(xy)
+    xy_coords = pd.DataFrame(xy_coords, columns = ['X','Y'])
 
     return xy_coords
 
@@ -666,8 +630,6 @@ def get_TRI_array(TRE_folder,TEI_filename):
     TEI = np.loadtxt(TEI_filename, dtype=float)
     TRI_list=[]
     for i in range(0,4):
-        T0n_filename = 'C:\\Users\\jocel\\OneDrive\\Desktop\\Sub00000009\\Trial 3\\T0' + str(i) + '.txt'
-        T0n = np.loadtxt(T0n_filename, dtype=float)
         TRE_filename = TRE_folder + 'TRE_' + str(i) +'.txt'
         TRE_data = np.loadtxt(TRE_filename, dtype=float)
         n_frames = int(TRE_data.shape[0]/4 )
@@ -685,63 +647,75 @@ def get_TRI_array(TRE_folder,TEI_filename):
     return TRI_all
 
 
-subject_path = 'C:\\Users\\jocel\\OneDrive\\Desktop\\20220607 Formal Data Collection\\Sub00000007\\Trial 2\\'
-TEI_path = 'C:\\Users\\jocel\\OneDrive\\Desktop\\20220607 Formal Data Collection\\Sub00000007\\TEI.txt'
-APB_path = subject_path + 'APB Dense Point Cloudz.txt'
-FPB_path = subject_path + 'FPB Dense Point Cloudz.txt'
-OPP_path = subject_path + 'OPP Dense Point Cloudz.txt'
 
-#4d array of all TRIs
-TRI_all = get_TRI_array(subject_path,TEI_path)
-try:
-    APB = np.loadtxt(APB_path)
-except:
-    APB = np.array([0,0,0],ndmin=2)
-try:
-    OPP = np.loadtxt(OPP_path)
-except:
-    OPP = np.array([0,0,0],ndmin=2)
-try:
-    FPB = np.loadtxt(FPB_path)
-except:
-    FPB = np.array([0,0,0],ndmin=2)
 
-muscles = [APB,FPB,OPP]
-s0=Scan('0',6,42,[20,35]) 
-#s1=Scan('1',5,57,[10,55]) 
-s2=Scan('2',0,62,[15,45])
-#s3=Scan('3',19,62,[20,45]) 
-scans = [s2,s0]
-for scan in [s0,s2]:
-    print(scan.scan_folder)
-    scan.skin_reconstruct()
-    print(scan.max_skin_point)
-current_muscle = np.array([0,0,0],ndmin = 2)
-
-for scan in scans:
-    
-    scan.shift = (scan.max_skin_point-s0.max_skin_point)
-    scan.segment_images()
-    scan.shift_points(s0.max_skin_point)
-    np.savetxt(subject_path +str(scan.folder)+ '\\' + muscle + side + 'points.txt',scan.dorsal_points)
-    if muscle == 'APB':
-        np.savetxt(subject_path +str(scan.folder) + '\\APBVolarPoints.txt',scan.volar_points)
-        try:
-            volar_pts = np.vstack([volar_pts,scan.volar_points])
-        except:
-            volar_pts = scan.volar_points
+def main():
+    #4d array of all TRIs
+    TRI_all = get_TRI_array(subject_path,TEI_path)
     try:
-        dorsal_pts = np.vstack([dorsal_pts,scan.dorsal_points])
+        APB = np.loadtxt(APB_path)
     except:
-        dorsal_pts = scan.dorsal_points
-    current_muscle = dorsal_pts
+        APB = np.array([0,0,0],ndmin=2)
+    try:
+        OPP = np.loadtxt(OPP_path)
+    except:
+        OPP = np.array([0,0,0],ndmin=2)
+    try:
+        FPB = np.loadtxt(FPB_path)
+    except:
+        FPB = np.array([0,0,0],ndmin=2)
+
+    current_muscle = np.array([0,0,0],ndmin = 2)
+    muscles = [APB,FPB,OPP]
+    s0=Scan('0',6,42,[20,35],current_muscle,muscles,TRI_all) 
+    #s1=Scan('1',5,57,[10,55]) 
+    s2=Scan('2',0,62,[15,45],current_muscle,muscles,TRI_all)
+    #s3=Scan('3',19,62,[20,45]) 
+    scans = [s2,s0]
+    for scan in [s0,s2]:
+        print(scan.scan_folder)
+        scan.skin_reconstruct()
+        print(scan.max_skin_point)
+
+
+    for scan in scans:
+        
+        scan.shift = (scan.max_skin_point-s0.max_skin_point)
+        scan.segment_images()
+        scan.shift_points(s0.max_skin_point)
+        np.savetxt(subject_path +str(scan.folder)+ '\\' + muscle + side + 'points.txt',scan.dorsal_points)
+        if muscle == 'APB':
+            np.savetxt(subject_path +str(scan.folder) + '\\APBVolarPoints.txt',scan.volar_points)
+            try:
+                volar_pts = np.vstack([volar_pts,scan.volar_points])
+            except:
+                volar_pts = scan.volar_points
+        try:
+            dorsal_pts = np.vstack([dorsal_pts,scan.dorsal_points])
+        except:
+            dorsal_pts = scan.dorsal_points
+        current_muscle = dorsal_pts
 
 
 
-if muscle == 'APB':
-    np.savetxt(subject_path + 'APBvolarPoints.txt',volar_pts)
-np.savetxt(subject_path + muscle + side + 'points.txt',dorsal_pts)
+    if muscle == 'APB':
+        np.savetxt(subject_path + 'APBvolarPoints.txt',volar_pts)
+    np.savetxt(subject_path + muscle + side + 'points.txt',dorsal_pts)
 
 
+def test():
+    TRI_all = get_TRI_array('TRE/','TEI.txt')
+    scan2 = Scan('2',6,42,[20,35],[0],[0],TRI_all)
 
- 
+    #scan2.images[10].crop_image()
+    image = scan2.images[10]
+    image.get_skin_surf()
+    image.crop_image()
+    image.get_border_by_click()
+    plt.imshow(image.cropped_img)
+    plt.show()
+    print(image.dorsal_pts)
+
+    scan2.images[11].get_border_by_tracking(image,image.dorsal_pts)
+    
+test()
