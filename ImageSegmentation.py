@@ -232,6 +232,7 @@ class Scan:
             hyst = self.apply_hyst_thresh()
             hyst_T = np.transpose(hyst)
 
+            self.skin_surf = np.array(self.skin_surf, ndmin=2)
             #Go along the skin surface and search for the muscle surface below it
             l2d_edge=[]
             for point in self.skin_surf:
@@ -248,6 +249,7 @@ class Scan:
             #Apply canny edge detection
             canny = feature.canny(self.img,5.5,low_threshold = 0.05, high_threshold = 0.1)
 
+            volar_points = []
             #Remove outliers in volar muscle surface
             for point in l2d_edge:
                 skin_point = self.skin_surf[np.where(self.skin_surf[:,0] == point[0])][0]
@@ -260,27 +262,28 @@ class Scan:
                     if i > upper_bound:
                         pixel = canny[i,point[0]]
                         if pixel == True:
-                            volar_point = pd.DataFrame([point[0],i],columns=['X','Y'])
+                            volar_point = [point[0],i]
                             break
                     i+=-1
                     if j < lower_bound:
                         pixel = canny[j,point[0]]
                         if pixel == True:
-                            volar_point = pd.DataFrame([point[0],j],columns=['X','Y'])
+                            volar_point = [point[0],j]
                             break
                     j+=1
                 
                 #If border point found, add it to volar_pts
                 if pixel == True:
-                    self.volar_pts._append(volar_point)    
+                    volar_points.append(volar_point)    
+            self.volar_pts = pd.DataFrame(volar_points,columns = ['X','Y'])
+            volar_np = np.array(volar_points,ndmin=2)
 
-
-            self.muscle_f = np.polyfit(self.volar_pts[:,0],self.volar_pts[:,1],deg = 2)
+            self.muscle_f = np.polyfit(volar_np[:,0],volar_np[:,1],deg = 2)
 
 
 
             #take curve fit to volar points of previous image. If volar points of current image aren't within 10 pixels of fitting curve, remove.
-            if self.images.index(self)>self.seg_range[0]:
+            """if self.images.index(self)>self.seg_range[0]:
                 self.current_img_index = self.images.index(self)
                 f = self.images[self.current_img_index-1].muscle_f
             else: 
@@ -291,7 +294,7 @@ class Scan:
             for i,y in enumerate(self.volar_pts['Y']):
                 if abs(y-yi[i])>45:
                     inidices_to_del.append(i)
-            self.volar_pts = self.volar_pts.drop(inidices_to_del,axis=0)
+            self.volar_pts = self.volar_pts.drop(inidices_to_del,axis=0)"""
 
         def get_border_by_click(self):
             #set img to cropped img and adjust volar points to fit cropped image
@@ -362,14 +365,16 @@ class Scan:
         def get_border_by_tracking(self,prev_img,prev_points):
             edge0 = feature.canny(prev_img,CANNY_sigma,low_threshold = CANNY_lowt, high_threshold = CANNY_hight)     
             edge1 = feature.canny(self.img,CANNY_sigma,low_threshold = CANNY_lowt, high_threshold = CANNY_hight) 
-            edge0_u8, edge1_u8 = binary_to_gs(edge0), binary_to_gs(edge1)
-            edge0_u8, edge1_u8 = (edge0_u8/255).astype('uint8'), (edge1_u8/255).astype('uint8')
+            edge0_gs, edge1_gs = binary_to_gs(edge0), binary_to_gs(edge1)
+            edge0_u8, edge1_u8 = (edge0_gs/255).astype('uint8'), (edge1_gs/255).astype('uint8')
 
             p0 = prev_points.to_numpy(dtype=np.float32)
 
             p1 = cv2.calcOpticalFlowPyrLK(edge0_u8,edge1_u8,p0,None)[0]
+            print('p1: ',p1)
 
             points = []
+            dorsal = []
             for p in p1:
                 p=[int(p[0]),int(p[1])]
                 point = find_closest_edge(p,edge1)
@@ -390,13 +395,13 @@ class Scan:
                     i-=1
                     continue
                 edges_remember = flood_fill(edges_remember,(edge[0],edge[1]),75)
-                edges_gs = flood_fill(edge0,(edge[0],edge[1]),75)
+                edges_gs = flood_fill(edge1_gs,(edge[0],edge[1]),75)
                 img_borders.append(get_border(edges_gs,side))
-                edge_pts = array_to_xy(edges_gs,75)
-                self.dorsal_pts.append(edge_pts)
-                self.dorsal_pts['edge_n'] = int(i)
+                edge_pts = array_to_xy(get_border(edges_gs,side),75)
+                self.dorsal_pts = self.dorsal_pts.append(pd.DataFrame(edge_pts,columns=['X','Y']))
+                #self.dorsal_pts['edge_n'] = int(i)
                 i+=1
-            self.dorsal_pts = self.dorsal_pts.set_index('edge_n')
+            #self.dorsal_pts = self.dorsal_pts.set_index('edge_n')
 
 
             #Adjust extracted dorsal points to Image Coordinate System
@@ -441,9 +446,9 @@ class Scan:
             plt.imshow(self.img, cmap='gray')
             if muscle == 'APB':
                 plt.scatter(self.volar_pts[:,0],self.volar_pts[:,1],color='red',s=0.5)
-            plt.scatter(self.dorsal_pts[:,0],self.dorsal_pts[:,1],color='blue',s=0.5)
-            plt.scatter(self.pts_ICS[:,0],self.pts_ICS[:,1], color='green', s=0.3 )
-            plt.scatter(self.current_pts_ICS[:,0],self.current_pts_ICS[:,1], color='purple', s=0.3 )
+            plt.scatter(self.dorsal_pts['X'],self.dorsal_pts['Y'],color='blue',s=0.5)
+            #plt.scatter(self.pts_ICS[:,0],self.pts_ICS[:,1], color='green', s=0.3 )
+            #plt.scatter(self.current_pts_ICS[:,0],self.current_pts_ICS[:,1], color='purple', s=0.3 )
             def press_redo(event):
                 self.redo = True 
                 print("redo: redo button pressed")
@@ -643,27 +648,24 @@ def get_TRI_array(TRE_folder,TEI_filename):
 
 
 def main():
+    volar_pts, dorsal_pts = pd.DataFrame(columns = ['X','Y','Z']), pd.DataFrame(columns = ['X','Y','Z'])
     #4d array of all TRIs
     TRI_all = get_TRI_array(subject_path,TEI_path)
-    try:
-        APB = np.loadtxt(APB_path)
-    except:
-        APB = np.array([0,0,0],ndmin=2)
-    try:
-        OPP = np.loadtxt(OPP_path)
-    except:
-        OPP = np.array([0,0,0],ndmin=2)
-    try:
-        FPB = np.loadtxt(FPB_path)
-    except:
-        FPB = np.array([0,0,0],ndmin=2)
-
-    current_muscle = np.array([0,0,0],ndmin = 2)
+    APB,FPB,OPP = pd.DataFrame(columns=['X','Y','Z']), pd.DataFrame(columns=['X','Y','Z']), pd.DataFrame(columns=['X','Y','Z'])
     muscles = [APB,FPB,OPP]
+    muscle_paths = [APB_path,FPB_path,OPP_path]
+    for i,muscle in enumerate(muscles):
+        try:
+            muscle = pd.read_excel(muscle_paths[i])
+        except:
+            continue
+    
+    current_muscle = dorsal_pts
+    
     s0=Scan('0',6,42,[20,35],current_muscle,muscles,TRI_all) 
-    #s1=Scan('1',5,57,[10,55]) 
+    s1=Scan('1',5,57,[10,55],current_muscle,muscles,TRI_all) 
     s2=Scan('2',0,62,[15,45],current_muscle,muscles,TRI_all)
-    #s3=Scan('3',19,62,[20,45]) 
+    s3=Scan('3',19,62,[20,45],current_muscle,muscles,TRI_all) 
     scans = [s2,s0]
     for scan in [s0,s2]:
         print(scan.scan_folder)
@@ -672,46 +674,16 @@ def main():
 
 
     for scan in scans:
-        
         scan.shift = (scan.max_skin_point-s0.max_skin_point)
         scan.segment_images()
         scan.shift_points(s0.max_skin_point)
-        np.savetxt(subject_path +str(scan.folder)+ '\\' + muscle + side + 'points.txt',scan.dorsal_points)
-        if muscle == 'APB':
-            np.savetxt(subject_path +str(scan.folder) + '\\APBVolarPoints.txt',scan.volar_points)
-            try:
-                volar_pts = np.vstack([volar_pts,scan.volar_points])
-            except:
-                volar_pts = scan.volar_points
-        try:
-            dorsal_pts = np.vstack([dorsal_pts,scan.dorsal_points])
-        except:
-            dorsal_pts = scan.dorsal_points
+        volar_pts = volar_pts.append(scan.volar_points)
+        dorsal_pts = dorsal_pts.append(scan.dorsal_points)
         current_muscle = dorsal_pts
 
+    with pd.ExcelWriter("pointcloud.xlsx") as writer:
+        dorsal_pts.to_excel(writer, sheet_name=muscle + '_' + side)
+        if muscle == 'APB':
+            volar_pts.to_excel(writer, sheet_name='APB_volar')
 
-
-    if muscle == 'APB':
-        np.savetxt(subject_path + 'APBvolarPoints.txt',volar_pts)
-    np.savetxt(subject_path + muscle + side + 'points.txt',dorsal_pts)
-
-
-
-
-"""
-def test():
-    TRI_all = get_TRI_array('TRE/','TEI.txt')
-    scan2 = Scan('2',6,42,[20,35],[0],[0],TRI_all)
-
-    #scan2.images[10].crop_image()
-    image = scan2.images[10]
-    image.get_skin_surf()
-    image.crop_image()
-    image.get_border_by_click()
-    plt.imshow(image.cropped_img)
-    plt.show()
-    print(image.dorsal_pts)
-
-    scan2.images[11].get_border_by_tracking(image.img,image.dorsal_pts)
-    
-test()"""
+main()
